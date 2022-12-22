@@ -22,12 +22,12 @@ impl Display for ListError {
 }
 
 /// A list stored on the stack of type T up to a maximum number of items S
-pub struct StackList<T: Sized + Copy, const S: usize> {
+pub struct StackList<T: Sized, const S: usize> {
     data: [mem::MaybeUninit<T>; S],
     writer_index: usize
 }
 
-impl<T: Sized + Copy, const S: usize> StackList<T, S> {
+impl<T: Sized, const S: usize> StackList<T, S> {
     /// Push an item to the end of the list
     pub fn push(&mut self, item: T) -> Result<(), ListError> {
         if self.is_full() {
@@ -46,7 +46,12 @@ impl<T: Sized + Copy, const S: usize> StackList<T, S> {
             None
         } else {
             self.writer_index -= 1;
-            Some(unsafe { self.data[self.writer_index].assume_init() })
+            Some(unsafe { 
+                mem::replace(
+                    &mut self.data[self.writer_index],
+                    mem::MaybeUninit::uninit()
+                ).assume_init()
+            })
         }
     }
 
@@ -79,24 +84,24 @@ impl<T: Sized + Copy, const S: usize> StackList<T, S> {
 }
 
 /// An iterator over the items in the list (Iterator)
-pub struct StackListIter<'a, T: Sized + Copy, const S: usize> {
+pub struct StackListIter<'a, T: Sized, const S: usize> {
     list: &'a StackList<T, S>,
     reader_index: usize
 }
 
-impl<'a, T: Sized + Copy, const S: usize> Iterator for StackListIter<'a, T, S> {
-    type Item = T;
+impl<'a, T: Sized, const S: usize> Iterator for StackListIter<'a, T, S> {
+    type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.reader_index == self.list.writer_index {
             // End of list reached.
             None
         } else {
-            let ret = self.list.data[self.reader_index];
+            let ret = &self.list.data[self.reader_index];
 
             self.reader_index += 1;
 
-            Some(unsafe { ret.assume_init() })
+            Some(unsafe { ret.assume_init_ref() })
         }
     }
 
@@ -106,17 +111,18 @@ impl<'a, T: Sized + Copy, const S: usize> Iterator for StackListIter<'a, T, S> {
     }
 }
 
-// IntoIterator
-pub struct IntoIter<T: Sized + Copy, const S: usize>(StackList<T, S>);
 
-impl<T: Sized + Copy, const S: usize> Iterator for IntoIter<T, S> {
+// IntoIterator
+pub struct IntoIter<T: Sized, const S: usize>(StackList<T, S>);
+
+impl<T: Sized, const S: usize> Iterator for IntoIter<T, S> {
     type Item = T;
     fn next(&mut self) -> Option<Self::Item> {
         self.0.pop()
     }
 }
 
-impl<T: Sized + Copy, const S: usize> IntoIterator for StackList<T, S> {
+impl<T: Sized, const S: usize> IntoIterator for StackList<T, S> {
     type Item = T;
     type IntoIter = IntoIter<T, S>;
 
@@ -143,8 +149,8 @@ mod test {
         assert!(list.pop() == Some(3));
         assert!(list.pop() == Some(2));
         assert!(list.pop() == Some(1));
-        assert!(list.pop() == None); // The list is now empty
-        assert!(list.pop() == None);
+        assert!(list.pop().is_none()); // The list is now empty
+        assert!(list.pop().is_none());
     }
 
     #[test]
@@ -159,7 +165,7 @@ mod test {
 
         for i in list.iter() {
             expected += 1;
-            assert!(i == expected);
+            assert!(*i == expected);
         }
     }
 
